@@ -203,7 +203,6 @@ PublicKey = {client.PublicKey}
 PrivateKey = {(client.PrivateKey != null ? client.PrivateKey : "REPLACE_ME")}
 Address = {client.Address}/24
 {(_config.WgDefaultDns != null ? $"DNS = {_config.WgDefaultDns}\n" : "")}
-{(_config.WgMtu != null ? $"MTU = {_config.WgMtu}\n" : "")}
 
 [Peer]
 PublicKey = {_config.ParsedConfig.Server.PublicKey}

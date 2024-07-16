@@ -1,9 +1,8 @@
 ﻿services:
   easywire:
-    image: 
-      killyp/easywire:latest
-    container_name: 
-      easywire
+    build:
+      context: .
+      dockerfile: EasyWire/Dockerfile
     ports:
       - "5000:8080"
       - "51820:51820/udp"
@@ -16,9 +15,9 @@
       - net.ipv4.conf.all.src_valid_mark=1
     volumes:
       - wireguard_config:/etc/wireguard
-      - easywire_config:/app/keys
+      - easywire_keys:/app/keys
     restart: unless-stopped
     
-volumes: 
+volumes:
   wireguard_config:
-  easywire_config:
+  easywire_keys:

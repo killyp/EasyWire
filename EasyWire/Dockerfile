@@ -1,11 +1,10 @@
 ﻿FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 USER $APP_ID
 WORKDIR /app
-EXPOSE 5000 51820/udp
 
 RUN apt-get update && apt-get install -y \
     iproute2 \
-    wireguard-tools \
+    wireguard \
     && rm -rf /var/lib/apt/lists/*
 RUN mkdir /app/keys && chown $APP_UID:$APP_UID /app/keys
 
