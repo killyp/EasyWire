@@ -1,5 +1,17 @@
-﻿<h3>QRCodeDialog</h3>
+﻿<MudDialog>
+    <DialogContent>
+        <div class="d-flex justify-center">
+            <MudImage Src="@($"data:image/svg+xml;base64,{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(QRCodeSvg))}")" Alt="QR Code" Width="300" Height="300" ObjectFit="ObjectFit.Contain" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
 
 @code {
-    
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; }
+    [Parameter] public string QRCodeSvg { get; set; }
+
+    private void Close() => MudDialog.Close();
 }

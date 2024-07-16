@@ -1,5 +1,43 @@
-﻿<h3>CreateConfigDialog</h3>
+﻿@inject WireguardService WireguardService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Required="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" OnClick="Submit">Create</MudButton>
+    </DialogActions>
+</MudDialog>
 
 @code {
-    
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; }
+
+    private string _name;
+
+    private void Cancel()
+    {
+        MudDialog.Cancel();
+    }
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_name))
+        {
+            Snackbar.Add("Name is required", Severity.Error);
+            return;
+        }
+
+        try
+        {
+            await WireguardService.CreateClientAsync(_name);
+            Snackbar.Add($"Configuration {_name} created successfully", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error creating configuration: {ex.Message}", Severity.Error);
+        }
+    }
 }

@@ -1,5 +1,54 @@
-﻿<h3>EditConfigDialog</h3>
+﻿@inject WireguardService WireguardService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Required="true" />
+        <MudTextField @bind-Value="_address" Label="Address" Required="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" OnClick="Submit">Save</MudButton>
+    </DialogActions>
+</MudDialog>
 
 @code {
-    
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; }
+    [Parameter] public string ClientId { get; set; }
+
+    private string _name;
+    private string _address;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var client = await WireguardService.GetClientAsync(ClientId);
+        _name = client.Name;
+        _address = client.Address;
+    }
+
+    private void Cancel()
+    {
+        MudDialog.Cancel();
+    }
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_name) || string.IsNullOrWhiteSpace(_address))
+        {
+            Snackbar.Add("Name and Address are required", Severity.Error);
+            return;
+        }
+
+        try
+        {
+            await WireguardService.UpdateClientNameAsync(ClientId, _name);
+            await WireguardService.UpdateClientAddressAsync(ClientId, _address);
+            Snackbar.Add($"Configuration updated successfully", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error updating configuration: {ex.Message}", Severity.Error);
+        }
+    }
 }

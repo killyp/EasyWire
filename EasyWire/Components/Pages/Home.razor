@@ -1,7 +1,117 @@
 ﻿@page "/"
+@inject WireguardService WireguardService
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject IJSRuntime JSRuntime
 
-<PageTitle>Home</PageTitle>
+<MudText Typo="Typo.h3" GutterBottom="true">WireGuard Configurations</MudText>
 
-<h1>Hello, world!</h1>
+<MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="OpenCreateDialog" Class="mb-4">Create New Configuration</MudButton>
 
-Welcome to your new app.
+<MudTable Items="@_clients" Dense="true" Hover="true" Bordered="true" Striped="true">
+    <HeaderContent>
+        <MudTh>Name</MudTh>
+        <MudTh>Address</MudTh>
+        <MudTh>Public Key</MudTh>
+        <MudTh>Created</MudTh>
+        <MudTh>Last Handshake</MudTh>
+        <MudTh>Transfer</MudTh>
+        <MudTh>Actions</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Name">@context.Name</MudTd>
+        <MudTd DataLabel="Address">@context.Address</MudTd>
+        <MudTd DataLabel="Public Key">@context.PublicKey</MudTd>
+        <MudTd DataLabel="Created">@context.CreatedAt.ToShortDateString()</MudTd>
+        <MudTd DataLabel="Last Handshake">
+            @(context.LatestHandshakeAt?.ToString() ?? "Never")
+        </MudTd>
+        <MudTd DataLabel="Transfer">
+            @($"↓ {FormatBytes(context.TransferRx)} ↑ {FormatBytes(context.TransferTx)}")
+        </MudTd>
+        <MudTd>
+            <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
+                <MudButton OnClick="@(() => OpenEditDialog(context))">Edit</MudButton>
+                <MudButton OnClick="@(() => ShowQRCode(context))">QR</MudButton>
+                <MudButton OnClick="@(() => DownloadConfig(context))">Download</MudButton>
+                <MudButton Color="Color.Error" OnClick="@(() => DeleteConfig(context))">Delete</MudButton>
+            </MudButtonGroup>
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+@code {
+    private List<ClientInfo> _clients = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshClients();
+    }
+
+    private async Task RefreshClients()
+    {
+        _clients = await WireguardService.GetClientsAsync();
+    }
+
+    private async Task OpenCreateDialog()
+    {
+        var dialog = DialogService.Show<CreateConfigDialog>("Create New Configuration");
+        var result = await dialog.Result;
+        if (!result.Canceled)
+        {
+            await RefreshClients();
+        }
+    }
+
+    private async Task OpenEditDialog(ClientInfo client)
+    {
+        var parameters = new DialogParameters { ["ClientId"] = client.Id };
+        var dialog = DialogService.Show<EditConfigDialog>("Edit Configuration", parameters);
+        var result = await dialog.Result;
+        if (!result.Canceled)
+        {
+            await RefreshClients();
+        }
+    }
+
+    private async Task ShowQRCode(ClientInfo client)
+    {
+        var qrCode = await WireguardService.GetClientQRCodeSvgAsync(client.Id);
+        var parameters = new DialogParameters { ["QRCodeSvg"] = qrCode };
+        DialogService.Show<QRCodeDialog>($"QR Code for {client.Name}", parameters);
+    }
+
+    private async Task DownloadConfig(ClientInfo client)
+    {
+        var config = await WireguardService.GetClientConfigurationAsync(client.Id);
+        await JSRuntime.InvokeVoidAsync("downloadFile", $"{client.Name}.conf", config);
+    }
+
+    private async Task DeleteConfig(ClientInfo client)
+    {
+        var result = await DialogService.ShowMessageBox(
+            "Delete Configuration",
+            $"Are you sure you want to delete the configuration for {client.Name}?",
+            yesText: "Delete", cancelText: "Cancel");
+
+        if (result == true)
+        {
+            await WireguardService.DeleteClientAsync(client.Id);
+            await RefreshClients();
+            Snackbar.Add($"Configuration for {client.Name} deleted", Severity.Success);
+        }
+    }
+
+    private string FormatBytes(long? bytes)
+    {
+        if (bytes == null) return "0 B";
+        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+        int order = 0;
+        while (bytes >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            bytes = bytes / 1024;
+        }
+        return $"{bytes:0.##} {sizes[order]}";
+    }
+}

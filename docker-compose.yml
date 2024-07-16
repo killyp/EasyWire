@@ -4,27 +4,17 @@
       context: .
       dockerfile: EasyWire/Dockerfile
     ports:
-      - "5000:5000"
-      - "5001:5001"
+      - "5000:8080"
       - "51820:51820/udp"
     environment:
-      - WG_PATH=/etc/wireguard
-      - WG_HOST=71.220.161.152
-      - WG_PORT=51820
-      - WG_CONFIG_PORT=51820
-      - WG_MTU=1420
-      - WG_DEFAULT_DNS=1.1.1.1
-      - WG_DEFAULT_ADDRESS=10.8.0.x
-      - WG_PERSISTENT_KEEPALIVE=25
-      - WG_ALLOWED_IPS=0.0.0.0/0, ::/0
-      - WG_PRE_UP=echo WireGuard PreUp
-      - WG_POST_UP=echo WireGuard PostUp
-      - WG_PRE_DOWN=echo WireGuard PreDown
-      - WG_POST_DOWN=echo WireGuard PostDown
+      - WG_HOST=REPLACE_ME
     cap_add:
       - NET_ADMIN
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
     volumes:
-      - /etc/wireguard:/etc/wireguard
+      - wireguard:/etc/wireguard
     restart: unless-stopped
+    
+volumes: 
+  wireguard:

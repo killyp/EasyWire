@@ -1,24 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
+﻿using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
-using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using QRCoder;
 using EasyWire.Models;
 
 namespace EasyWire.Services;
 
-public class Wireguard
+public class WireguardService
 {
-    private readonly ILogger<Wireguard> _logger;
+    private readonly ILogger<WireguardService> _logger;
     private readonly WireGuardConfig _config;
     private bool _isInitialized = false;
 
-    public Wireguard(ILogger<Wireguard> logger, WireGuardConfig config)
+    public WireguardService(ILogger<WireguardService> logger, WireGuardConfig config)
     {
         _logger = logger;
         _config = config;
@@ -168,9 +162,23 @@ PublicKey = {client.PublicKey}
     public async Task SyncConfigAsync()
     {
         _logger.LogDebug("Config syncing...");
-        await ExecuteCommandAsync("wg", "syncconf wg0 <(wg-quick strip wg0)");
+        var tempConfigFile = Path.Combine(Path.GetTempPath(), "wg0.sync.conf");
+        try
+        {
+            var configContent = await ExecuteCommandAsync("wg-quick", "strip wg0");
+            await File.WriteAllTextAsync(tempConfigFile, configContent);
+            await ExecuteCommandAsync("wg", $"syncconf wg0 {tempConfigFile}");
+        }
+        finally
+        {
+            if (File.Exists(tempConfigFile))
+            {
+                File.Delete(tempConfigFile);
+            }
+        }
         _logger.LogDebug("Config synced.");
     }
+
 
     public async Task<ClientConfig> GetClientAsync(string clientId)
     {
@@ -197,7 +205,7 @@ PublicKey = {_config.ParsedConfig.Server.PublicKey}
 {(client.PreSharedKey != null ? $"PresharedKey = {client.PreSharedKey}\n" : "")}
 AllowedIPs = {_config.WgAllowedIps}
 PersistentKeepalive = {_config.WgPersistentKeepalive}
-Endpoint = {_config.WgHost}:{_config.WgConfigPort}";
+Endpoint = {_config.WgHost}:{_config.WgPort}";
     }
 
     public async Task<string> GetClientQRCodeSvgAsync(string clientId)
