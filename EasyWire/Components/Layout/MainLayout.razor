@@ -7,28 +7,29 @@
 <MudPopoverProvider />
 
 <MudLayout>
-    <MudAppBar>
-        <MudSpacer/>
-        <MudText Typo="Typo.h4">EasyWire</MudText>
-        <MudSpacer/>
-        <MudToggleIconButton
-            Icon="@Icons.Material.Filled.LightMode"
-            ToggledIcon="@Icons.Material.Filled.DarkMode"
-            Toggled="@isDarkMode"
-            ToggledChanged="ToggleDarkMode"
-            Color="Color.Inherit"
-            Edge="Edge.End"/>
-    </MudAppBar>
+    <MudContainer MaxWidth="MaxWidth.Large" Class="pt-6">
+        <MudStack Row="true">
+            <MudText Typo="Typo.h4">EasyWire</MudText>
+            <MudSpacer/>
+            <MudToggleIconButton
+                Icon="@Icons.Material.Filled.LightMode"
+                ToggledIcon="@Icons.Material.Filled.DarkMode"
+                Toggled="@isDarkMode"
+                ToggledChanged="ToggleDarkMode"
+                Color="Color.Inherit"
+                Edge="Edge.End"/>
+        </MudStack>
+    </MudContainer>
     <MudMainContent>
-        @Body
+        <MudContainer MaxWidth="MaxWidth.Large">
+            @Body
+        </MudContainer>
     </MudMainContent>
 </MudLayout>
 
 @code {
-    private MudTheme? currentTheme;
     private bool isDarkMode = false;
     
-    // Load dark mode settings from local storage and set them
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
@@ -44,7 +45,6 @@
         isDarkMode = !isDarkMode;
         await LocalStorage.SetAsync("DarkMode", isDarkMode);
     }
-    
     
     private MudTheme myTheme = new()
     {
@@ -63,5 +63,4 @@
             DefaultBorderRadius = "6px"
         }
     };
-    
 }

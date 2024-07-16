@@ -10,9 +10,9 @@
 <MudContainer MaxWidth="MaxWidth.Large" Class="mt-4">
     @if (_isLoading)
     {
-        <MudPaper Elevation="0" Class="d-flex justify-center align-center mud-width-full py-8">
+        <MudStack Row="true">
             <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Large" />
-        </MudPaper>
+        </MudStack>
     }
     else if (!_isAuthenticated)
     {
@@ -32,15 +32,15 @@
     }
     else
     {
-        <MudPaper Elevation="0" Class="mb-4">
+        <MudStack Class="mb-4">
             <MudText Typo="Typo.h4">WireGuard Configurations</MudText>
             <MudText Typo="Typo.body2" Class="mud-text-secondary">Manage your WireGuard VPN configurations</MudText>
-        </MudPaper>
+        </MudStack>
 
-        <MudPaper Elevation="0" Class="d-flex justify-space-between align-center mb-4">
+        <MudStack Row="true" Class="d-flex justify-space-between align-center mb-4">
             <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreateDialog">New Configuration</MudButton>
-            <MudButton Color="Color.Secondary" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RefreshClients">Refresh</MudButton>
-        </MudPaper>
+            <MudButton Color="Color.Primary" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RefreshClients">Refresh</MudButton>
+        </MudStack>
 
         <MudPaper Elevation="3">
             <MudTable Items="@_clients" Dense="true" Hover="true" Bordered="false" Striped="true">
