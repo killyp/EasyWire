@@ -1,8 +1,9 @@
 ﻿services:
   easywire:
-    build:
-      context: .
-      dockerfile: EasyWire/Dockerfile
+    image: 
+      killyp/easywire:latest
+    container_name: 
+      easywire
     ports:
       - "5000:8080"
       - "51820:51820/udp"
