@@ -3,49 +3,148 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject IJSRuntime JSRuntime
+@inject IConfiguration Configuration
+@inject ProtectedLocalStorage LocalStorage
+@rendermode InteractiveServer
 
-<MudText Typo="Typo.h3" GutterBottom="true">WireGuard Configurations</MudText>
+<MudContainer MaxWidth="MaxWidth.Large" Class="mt-4">
+    @if (_isLoading)
+    {
+        <MudPaper Elevation="0" Class="d-flex justify-center align-center mud-width-full py-8">
+            <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Large" />
+        </MudPaper>
+    }
+    else if (!_isAuthenticated)
+    {
+        <MudCard Elevation="3" Class="pa-4 ma-auto" Style="max-width: 400px;">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h5">Login to EasyWire</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudTextField @bind-Value="_password" Label="Password" InputType="InputType.Password" Variant="Variant.Outlined" />
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Color="Color.Primary" Variant="Variant.Filled" FullWidth="true" OnClick="Login">Login</MudButton>
+            </MudCardActions>
+        </MudCard>
+    }
+    else
+    {
+        <MudPaper Elevation="0" Class="mb-4">
+            <MudText Typo="Typo.h4">WireGuard Configurations</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Manage your WireGuard VPN configurations</MudText>
+        </MudPaper>
 
-<MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="OpenCreateDialog" Class="mb-4">Create New Configuration</MudButton>
+        <MudPaper Elevation="0" Class="d-flex justify-space-between align-center mb-4">
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreateDialog">New Configuration</MudButton>
+            <MudButton Color="Color.Secondary" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RefreshClients">Refresh</MudButton>
+        </MudPaper>
 
-<MudTable Items="@_clients" Dense="true" Hover="true" Bordered="true" Striped="true">
-    <HeaderContent>
-        <MudTh>Name</MudTh>
-        <MudTh>Address</MudTh>
-        <MudTh>Public Key</MudTh>
-        <MudTh>Created</MudTh>
-        <MudTh>Last Handshake</MudTh>
-        <MudTh>Transfer</MudTh>
-        <MudTh>Actions</MudTh>
-    </HeaderContent>
-    <RowTemplate>
-        <MudTd DataLabel="Name">@context.Name</MudTd>
-        <MudTd DataLabel="Address">@context.Address</MudTd>
-        <MudTd DataLabel="Public Key">@context.PublicKey</MudTd>
-        <MudTd DataLabel="Created">@context.CreatedAt.ToShortDateString()</MudTd>
-        <MudTd DataLabel="Last Handshake">
-            @(context.LatestHandshakeAt?.ToString() ?? "Never")
-        </MudTd>
-        <MudTd DataLabel="Transfer">
-            @($"↓ {FormatBytes(context.TransferRx)} ↑ {FormatBytes(context.TransferTx)}")
-        </MudTd>
-        <MudTd>
-            <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
-                <MudButton OnClick="@(() => OpenEditDialog(context))">Edit</MudButton>
-                <MudButton OnClick="@(() => ShowQRCode(context))">QR</MudButton>
-                <MudButton OnClick="@(() => DownloadConfig(context))">Download</MudButton>
-                <MudButton Color="Color.Error" OnClick="@(() => DeleteConfig(context))">Delete</MudButton>
-            </MudButtonGroup>
-        </MudTd>
-    </RowTemplate>
-</MudTable>
+        <MudPaper Elevation="3">
+            <MudTable Items="@_clients" Dense="true" Hover="true" Bordered="false" Striped="true">
+                <HeaderContent>
+                    <MudTh>Name</MudTh>
+                    <MudTh>Address</MudTh>
+                    <MudTh>Public Key</MudTh>
+                    <MudTh>Created</MudTh>
+                    <MudTh>Last Handshake</MudTh>
+                    <MudTh>Transfer</MudTh>
+                    <MudTh>Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Name">@context.Name</MudTd>
+                    <MudTd DataLabel="Address">@context.Address</MudTd>
+                    <MudTd DataLabel="Public Key">
+                        <MudTooltip Text="@context.PublicKey">
+                            <MudText Typo="Typo.body2" Style="max-width: 150px; overflow: hidden; text-overflow: ellipsis;">@context.PublicKey</MudText>
+                        </MudTooltip>
+                    </MudTd>
+                    <MudTd DataLabel="Created">@context.CreatedAt.ToShortDateString()</MudTd>
+                    <MudTd DataLabel="Last Handshake">
+                        @(context.LatestHandshakeAt?.ToString() ?? "Never")
+                    </MudTd>
+                    <MudTd DataLabel="Transfer">
+                        <MudTooltip Text="Download">
+                            <MudIcon Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" Class="mr-2" />
+                        </MudTooltip>
+                        @FormatBytes(context.TransferRx)
+                        <MudTooltip Text="Upload">
+                            <MudIcon Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Class="mr-2 ml-4" />
+                        </MudTooltip>
+                        @FormatBytes(context.TransferTx)
+                    </MudTd>
+                    <MudTd>
+                        <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Color="Color.Success" OnClick="@(() => OpenEditDialog(context))" />
+                            <MudIconButton Icon="@Icons.Material.Filled.QrCode" Color="Color.Secondary" OnClick="@(() => ShowQRCode(context))" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Download" Color="Color.Info" OnClick="@(() => DownloadConfig(context))" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" OnClick="@(() => DeleteConfig(context))" />
+                        </MudButtonGroup>
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudPaper>
+    }
+</MudContainer>
 
 @code {
     private List<ClientInfo> _clients = new();
-
-    protected override async Task OnInitializedAsync()
+    private bool _isAuthenticated = false;
+    private string _password = "";
+    private bool _isLoading = true;
+    
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        await RefreshClients();
+        if (firstRender)
+        {
+            await CheckAuthenticationAsync();
+        }
+    }
+
+    private async Task CheckAuthenticationAsync()
+    {
+        var storedHashResult = await LocalStorage.GetAsync<string>("Hash");
+        if (storedHashResult.Success)
+        {
+            var correctPasswordHash = ComputeHash(Configuration["PASSWORD"]);
+            _isAuthenticated = storedHashResult.Value == correctPasswordHash;
+
+            if (_isAuthenticated)
+            {
+                await RefreshClients();
+            }
+        }
+        _isLoading = false;
+        StateHasChanged();
+    }
+
+    private async Task Login()
+    {
+        var correctPasswordHash = ComputeHash(Configuration["PASSWORD"]);
+        var inputPasswordHash = ComputeHash(_password);
+
+        if (inputPasswordHash == correctPasswordHash)
+        {
+            _isAuthenticated = true;
+            await LocalStorage.SetAsync("Hash", inputPasswordHash);
+            await RefreshClients();
+        }
+        else
+        {
+            Snackbar.Add("Incorrect password", Severity.Error);
+        }
+    }
+
+    private string ComputeHash(string input)
+    {
+        using (SHA256 sha256 = SHA256.Create())
+        {
+            byte[] inputBytes = Encoding.UTF8.GetBytes(input);
+            byte[] hashBytes = sha256.ComputeHash(inputBytes);
+            return Convert.ToBase64String(hashBytes);
+        }
     }
 
     private async Task RefreshClients()

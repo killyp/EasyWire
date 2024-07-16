@@ -9,13 +9,16 @@
       - "51820:51820/udp"
     environment:
       - WG_HOST=REPLACE_ME
+      - PASSWORD=REPLACE_ME
     cap_add:
       - NET_ADMIN
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
     volumes:
-      - wireguard:/etc/wireguard
+      - wireguard_config:/etc/wireguard
+      - easywire_config:/app/keys
     restart: unless-stopped
     
 volumes: 
-  wireguard:
+  wireguard_config:
+  easywire_config:

@@ -12,10 +12,15 @@ public class WireguardService
     private readonly WireGuardConfig _config;
     private bool _isInitialized = false;
 
-    public WireguardService(ILogger<WireguardService> logger, WireGuardConfig config)
+    public WireguardService(ILogger<WireguardService> logger)
     {
         _logger = logger;
-        _config = config;
+        _config = new WireGuardConfig();
+        
+        if (string.IsNullOrEmpty(_config.WgHost))
+        {
+            throw new Exception("WG_HOST Environment Variable Not Set!");
+        }
     }
 
     public async Task InitializeAsync()
