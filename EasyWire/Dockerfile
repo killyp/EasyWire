@@ -5,6 +5,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     iproute2 \
     wireguard \
+    iptables \
     && rm -rf /var/lib/apt/lists/*
 RUN mkdir /app/keys && chown $APP_UID:$APP_UID /app/keys
 

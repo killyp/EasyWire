@@ -61,6 +61,7 @@ public class WireguardService
         try
         {
             await ExecuteCommandAsync("wg-quick", "up wg0");
+            await ConfigureIptables(true);
         }
         catch (Exception ex)
         {
@@ -72,6 +73,25 @@ public class WireguardService
         }
         await SyncConfigAsync();
         _isInitialized = true;
+    }
+    
+    private async Task ConfigureIptables(bool isSettingUp)
+    {
+        string device = "eth0";
+        if (isSettingUp)
+        {
+            await ExecuteCommandAsync("iptables", $"-t nat -A POSTROUTING -s {_config.ParsedConfig.Server.Address}/24 -o {device} -j MASQUERADE");
+            await ExecuteCommandAsync("iptables", $"-A INPUT -p udp -m udp --dport {_config.WgPort} -j ACCEPT");
+            await ExecuteCommandAsync("iptables", $"-A FORWARD -i wg0 -j ACCEPT");
+            await ExecuteCommandAsync("iptables", $"-A FORWARD -o wg0 -j ACCEPT");
+        }
+        else
+        {
+            await ExecuteCommandAsync("iptables", $"-t nat -D POSTROUTING -s {_config.ParsedConfig.Server.Address}/24 -o {device} -j MASQUERADE");
+            await ExecuteCommandAsync("iptables", $"-D INPUT -p udp -m udp --dport {_config.WgPort} -j ACCEPT");
+            await ExecuteCommandAsync("iptables", $"-D FORWARD -i wg0 -j ACCEPT");
+            await ExecuteCommandAsync("iptables", $"-D FORWARD -o wg0 -j ACCEPT");
+        }
     }
 
     public async Task<List<ClientInfo>> GetClientsAsync()
