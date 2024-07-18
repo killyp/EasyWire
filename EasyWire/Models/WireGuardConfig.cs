@@ -4,6 +4,15 @@ namespace EasyWire.Models;
 
 public class WireGuardConfig
 {
+    // Server configuration
+    public string ServerPrivateKey { get; set; }
+    public string ServerPublicKey { get; set; }
+    public string ServerAddress { get; set; }
+
+    // Client configurations
+    public Dictionary<string, ClientConfig> Clients { get; set; }
+
+    // General configuration settings
     public string WgPath { get; set; } = "/etc/wireguard";
     public string WgHost { get; set; } = Environment.GetEnvironmentVariable("WG_HOST") ?? "";
     public int WgPort { get; set; } = int.Parse(Environment.GetEnvironmentVariable("WG_PORT") ?? "51820");
@@ -15,6 +24,4 @@ public class WireGuardConfig
     public string WgPostUp { get; set; } = "echo WireGuard PostUp";
     public string WgPreDown { get; set; } = "echo WireGuard PreDown";
     public string WgPostDown { get; set; } = "echo WireGuard PostDown";
-
-    public ParsedConfig ParsedConfig { get; set; }
 }

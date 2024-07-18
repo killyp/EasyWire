@@ -1,164 +1,142 @@
-﻿using System.Diagnostics;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text.Json;
-using QRCoder;
+using System.Threading.Tasks;
 using EasyWire.Models;
+using Microsoft.Extensions.Logging;
+using QRCoder;
 
-namespace EasyWire.Services;
-
-public class WireguardService
+namespace EasyWire.Services
 {
-    private readonly ILogger<WireguardService> _logger;
-    private readonly WireGuardConfig _config;
-    private bool _isInitialized = false;
-
-    public WireguardService(ILogger<WireguardService> logger)
+    public class WireguardService
     {
-        _logger = logger;
-        _config = new WireGuardConfig();
-        
-        if (string.IsNullOrEmpty(_config.WgHost))
-        {
-            throw new Exception("WG_HOST Environment Variable Not Set!");
-        }
-    }
+        private WireGuardConfig _config;
+        private bool _isInitialized = false;
 
-    public async Task InitializeAsync()
-    {
-        if (string.IsNullOrEmpty(_config.WgHost))
+        public WireguardService()
         {
-            throw new Exception("WG_HOST Environment Variable Not Set!");
-        }
-
-        _logger.LogDebug("Loading configuration...");
-        try
-        {
-            var configJson = await File.ReadAllTextAsync(Path.Combine(_config.WgPath, "wg0.json"));
-            _config.ParsedConfig = JsonSerializer.Deserialize<ParsedConfig>(configJson);
-            _logger.LogDebug("Configuration loaded.");
-        }
-        catch (Exception)
-        {
-            var privateKey = await ExecuteCommandAsync("wg", "genkey");
-            var publicKey = await ExecuteCommandAsync("wg", "pubkey", privateKey);
-            var address = _config.WgDefaultAddress.Replace("x", "1");
-
-            _config.ParsedConfig = new ParsedConfig
+            _config = new WireGuardConfig();
+            
+            if (string.IsNullOrEmpty(_config.WgHost))
             {
-                Server = new ServerConfig
+                throw new Exception("WG_HOST Environment Variable Not Set!");
+            }
+        }
+
+        public async Task InitializeAsync()
+        {
+            if (string.IsNullOrEmpty(_config.WgHost))
+            {
+                throw new Exception("WG_HOST Environment Variable Not Set!");
+            }
+
+            Console.WriteLine("Loading configuration...");
+            try
+            {
+                var configJsonPath = await File.ReadAllTextAsync(Path.Combine(_config.WgPath, "wg0.json"));
+                _config = JsonSerializer.Deserialize<WireGuardConfig>(configJsonPath);
+                Console.WriteLine("Configuration loaded.");
+            }
+            catch (Exception)
+            {
+                _config.ServerPrivateKey = await ExecuteCommandAsync("wg", "genkey");
+                _config.ServerPublicKey = await ExecuteCommandAsync("wg", "pubkey", _config.ServerPrivateKey);
+                _config.ServerAddress = _config.WgDefaultAddress.Replace("x", "1");
+                _config.Clients = new Dictionary<string, ClientConfig>();
+                Console.WriteLine("Configuration generated.");
+            }
+
+            await SaveConfigAsync();
+            await ExecuteCommandAsync("wg-quick", "down wg0").ContinueWith(_ => { });
+            try
+            {
+                await ExecuteCommandAsync("wg-quick", "up wg0");
+                await ConfigureIptables(true);
+            }
+            catch (Exception ex)
+            {
+                if (ex.Message.Contains("Cannot find device \"wg0\""))
                 {
-                    PrivateKey = privateKey,
-                    PublicKey = publicKey,
-                    Address = address
-                },
-                Clients = new Dictionary<string, ClientConfig>()
-            };
-            _logger.LogDebug("Configuration generated.");
-        }
-
-        await SaveConfigAsync();
-        await ExecuteCommandAsync("wg-quick", "down wg0").ContinueWith(_ => { });
-        try
-        {
-            await ExecuteCommandAsync("wg-quick", "up wg0");
-            await ConfigureIptables(true);
-        }
-        catch (Exception ex)
-        {
-            if (ex.Message.Contains("Cannot find device \"wg0\""))
-            {
-                throw new Exception("WireGuard exited with the error: Cannot find device \"wg0\"\nThis usually means that your host's kernel does not support WireGuard!");
+                    throw new Exception("WireGuard exited with the error: Cannot find device \"wg0\"\nThis usually means that your host's kernel does not support WireGuard!");
+                }
+                throw;
             }
-            throw;
+            await SyncConfigAsync();
+            _isInitialized = true;
         }
-        await SyncConfigAsync();
-        _isInitialized = true;
-    }
-    
-    private async Task ConfigureIptables(bool isSettingUp)
-    {
-        string device = "eth0";
-        if (isSettingUp)
+        
+        private async Task ConfigureIptables(bool isSettingUp)
         {
-            await ExecuteCommandAsync("iptables", $"-t nat -A POSTROUTING -s {_config.ParsedConfig.Server.Address}/24 -o {device} -j MASQUERADE");
-            await ExecuteCommandAsync("iptables", $"-A INPUT -p udp -m udp --dport {_config.WgPort} -j ACCEPT");
-            await ExecuteCommandAsync("iptables", $"-A FORWARD -i wg0 -j ACCEPT");
-            await ExecuteCommandAsync("iptables", $"-A FORWARD -o wg0 -j ACCEPT");
-        }
-        else
-        {
-            await ExecuteCommandAsync("iptables", $"-t nat -D POSTROUTING -s {_config.ParsedConfig.Server.Address}/24 -o {device} -j MASQUERADE");
-            await ExecuteCommandAsync("iptables", $"-D INPUT -p udp -m udp --dport {_config.WgPort} -j ACCEPT");
-            await ExecuteCommandAsync("iptables", $"-D FORWARD -i wg0 -j ACCEPT");
-            await ExecuteCommandAsync("iptables", $"-D FORWARD -o wg0 -j ACCEPT");
-        }
-    }
-
-    public async Task<List<ClientInfo>> GetClientsAsync()
-    {
-        if (!_isInitialized)
-        {
-            await InitializeAsync();
-        }
-
-        if (_config.ParsedConfig?.Clients == null)
-        {
-            return new List<ClientInfo>();
-        }
-
-        var clients = _config.ParsedConfig.Clients.Select(kvp => new ClientInfo
-        {
-            Id = kvp.Key,
-            Name = kvp.Value.Name,
-            Enabled = kvp.Value.Enabled,
-            Address = kvp.Value.Address,
-            PublicKey = kvp.Value.PublicKey,
-            CreatedAt = kvp.Value.CreatedAt,
-            UpdatedAt = kvp.Value.UpdatedAt,
-            AllowedIPs = kvp.Value.AllowedIPs,
-            DownloadableConfig = kvp.Value.PrivateKey != null,
-            PersistentKeepalive = null,
-            LatestHandshakeAt = null,
-            TransferRx = null,
-            TransferTx = null
-        }).ToList();
-
-        try
-        {
-            var dump = await ExecuteCommandAsync("wg", "show wg0 dump");
-            var lines = dump.Trim().Split('\n').Skip(1);
-            foreach (var line in lines)
+            string device = "eth0";
+            if (isSettingUp)
             {
-                var parts = line.Split('\t');
-                var publicKey = parts[0];
-                var client = clients.Find(c => c.PublicKey == publicKey);
-                if (client == null) continue;
-
-                client.LatestHandshakeAt = parts[4] == "0" ? null : DateTimeOffset.FromUnixTimeSeconds(long.Parse(parts[4])).DateTime;
-                client.TransferRx = long.Parse(parts[5]);
-                client.TransferTx = long.Parse(parts[6]);
-                client.PersistentKeepalive = parts[7];
+                await ExecuteCommandAsync("iptables", $"-t nat -A POSTROUTING -s {_config.ServerAddress}/24 -o {device} -j MASQUERADE");
+                await ExecuteCommandAsync("iptables", $"-A INPUT -p udp -m udp --dport {_config.WgPort} -j ACCEPT");
+                await ExecuteCommandAsync("iptables", $"-A FORWARD -i wg0 -j ACCEPT");
+                await ExecuteCommandAsync("iptables", $"-A FORWARD -o wg0 -j ACCEPT");
+            }
+            else
+            {
+                await ExecuteCommandAsync("iptables", $"-t nat -D POSTROUTING -s {_config.ServerAddress}/24 -o {device} -j MASQUERADE");
+                await ExecuteCommandAsync("iptables", $"-D INPUT -p udp -m udp --dport {_config.WgPort} -j ACCEPT");
+                await ExecuteCommandAsync("iptables", $"-D FORWARD -i wg0 -j ACCEPT");
+                await ExecuteCommandAsync("iptables", $"-D FORWARD -o wg0 -j ACCEPT");
             }
         }
-        catch (Exception ex)
+
+        public async Task<List<ClientConfig>> GetClientsAsync()
         {
-            _logger.LogError(ex, "Error while getting WireGuard status");
+            if (!_isInitialized)
+            {
+                await InitializeAsync();
+            }
+
+            if (_config.Clients == null)
+            {
+                return new List<ClientConfig>();
+            }
+
+            var clients = _config.Clients.Values.ToList();
+
+            try
+            {
+                var dump = await ExecuteCommandAsync("wg", "show wg0 dump");
+                var lines = dump.Trim().Split('\n').Skip(1);
+                foreach (var line in lines)
+                {
+                    var parts = line.Split('\t');
+                    var publicKey = parts[0];
+                    var client = clients.Find(c => c.PublicKey == publicKey);
+                    if (client == null) continue;
+
+                    client.LatestHandshakeAt = parts[4] == "0" ? null : DateTimeOffset.FromUnixTimeSeconds(long.Parse(parts[4])).DateTime;
+                    client.TransferRx = long.Parse(parts[5]);
+                    client.TransferTx = long.Parse(parts[6]);
+                    client.PersistentKeepalive = parts[7];
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error while getting WireGuard status - {ex}");
+            }
+
+            return clients;
         }
 
-        return clients;
-    }
-
-
-    public async Task SaveConfigAsync()
-    {
-        var configContent = $@"
+        public async Task SaveConfigAsync()
+        {
+            var configContent = $@"
 # Note: Do not edit this file directly.
 # Your changes will be overwritten!
 
 # Server
 [Interface]
-PrivateKey = {_config.ParsedConfig.Server.PrivateKey}
-Address = {_config.ParsedConfig.Server.Address}/24
+PrivateKey = {_config.ServerPrivateKey}
+Address = {_config.ServerAddress}/24
 ListenPort = {_config.WgPort}
 PreUp = {_config.WgPreUp}
 PostUp = {_config.WgPostUp}
@@ -166,229 +144,208 @@ PreDown = {_config.WgPreDown}
 PostDown = {_config.WgPostDown}
 ";
 
-        foreach (var (clientId, client) in _config.ParsedConfig.Clients)
-        {
-            if (!client.Enabled) continue;
+            Console.WriteLine(configContent);
+            foreach (var (clientId, client) in _config.Clients)
+            {
+                if (!client.Enabled) continue;
 
-            configContent += $@"
+                configContent += $@"
 
 # Client: {client.Name} ({clientId})
 [Peer]
 PublicKey = {client.PublicKey}
 {(client.PreSharedKey != null ? $"PresharedKey = {client.PreSharedKey}\n" : "")}AllowedIPs = {client.Address}/32";
-        }
-
-        _logger.LogDebug("Config saving...");
-        await File.WriteAllTextAsync(Path.Combine(_config.WgPath, "wg0.json"), JsonSerializer.Serialize(_config.ParsedConfig, new JsonSerializerOptions { WriteIndented = true }));
-        await File.WriteAllTextAsync(Path.Combine(_config.WgPath, "wg0.conf"), configContent);
-        _logger.LogDebug("Config saved.");
-    }
-
-    public async Task SyncConfigAsync()
-    {
-        _logger.LogDebug("Config syncing...");
-        var tempConfigFile = Path.Combine(Path.GetTempPath(), "wg0.sync.conf");
-        try
-        {
-            var configContent = await ExecuteCommandAsync("wg-quick", "strip wg0");
-            await File.WriteAllTextAsync(tempConfigFile, configContent);
-            await ExecuteCommandAsync("wg", $"syncconf wg0 {tempConfigFile}");
-        }
-        finally
-        {
-            if (File.Exists(tempConfigFile))
-            {
-                File.Delete(tempConfigFile);
             }
+
+            Console.WriteLine("Config saving...");
+            await File.WriteAllTextAsync(Path.Combine(_config.WgPath, "wg0.json"), JsonSerializer.Serialize(_config, new JsonSerializerOptions { WriteIndented = true }));
+            await File.WriteAllTextAsync(Path.Combine(_config.WgPath, "wg0.conf"), configContent);
+            Console.WriteLine("Config saved.");
         }
-        _logger.LogDebug("Config synced.");
-    }
 
-
-    public async Task<ClientConfig> GetClientAsync(string clientId)
-    {
-        if (!_config.ParsedConfig.Clients.TryGetValue(clientId, out var client))
+        public async Task SyncConfigAsync()
         {
-            throw new Exception($"Client Not Found: {clientId}");
+            Console.WriteLine("Config syncing...");
+            var tempConfigFile = Path.Combine(Path.GetTempPath(), "wg0.sync.conf");
+            try
+            {
+                var configContent = await ExecuteCommandAsync("wg-quick", "strip wg0");
+                await File.WriteAllTextAsync(tempConfigFile, configContent);
+                await ExecuteCommandAsync("wg", $"syncconf wg0 {tempConfigFile}");
+            }
+            finally
+            {
+                if (File.Exists(tempConfigFile))
+                {
+                    File.Delete(tempConfigFile);
+                }
+            }
+            Console.WriteLine("Config synced.");
         }
-        return client;
-    }
 
-    public async Task<string> GetClientConfigurationAsync(string clientId)
-    {
-        var client = await GetClientAsync(clientId);
+        public async Task<ClientConfig> GetClientAsync(string clientId)
+        {
+            if (!_config.Clients.TryGetValue(clientId, out var client))
+            {
+                throw new Exception($"Client Not Found: {clientId}");
+            }
+            return client;
+        }
 
-        return $@"
+        public async Task<string> GetClientConfigurationAsync(string clientId)
+        {
+            var client = await GetClientAsync(clientId);
+
+            return $@"
 [Interface]
-PrivateKey = {(client.PrivateKey != null ? client.PrivateKey : "REPLACE_ME")}
+PrivateKey = {client.PrivateKey}
 Address = {client.Address}/24
 {(_config.WgDefaultDns != null ? $"DNS = {_config.WgDefaultDns}\n" : "")}
 
 [Peer]
-PublicKey = {_config.ParsedConfig.Server.PublicKey}
-{(client.PreSharedKey != null ? $"PresharedKey = {client.PreSharedKey}\n" : "")}
+PublicKey = {_config.ServerPublicKey}
+{(client.PreSharedKey != null ? $"PresharedKey = {client.PreSharedKey}" : "")}
 AllowedIPs = {_config.WgAllowedIps}
 PersistentKeepalive = {_config.WgPersistentKeepalive}
 Endpoint = {_config.WgHost}:{_config.WgPort}";
-    }
-
-    public async Task<string> GetClientQRCodeSvgAsync(string clientId)
-    {
-        var config = await GetClientConfigurationAsync(clientId);
-        var qrGenerator = new QRCodeGenerator();
-        var qrCodeData = qrGenerator.CreateQrCode(config, QRCodeGenerator.ECCLevel.Q);
-        var qrCode = new SvgQRCode(qrCodeData);
-        return qrCode.GetGraphic(20);
-    }
-
-    public async Task<ClientConfig> CreateClientAsync(string name)
-    {
-        if (string.IsNullOrEmpty(name))
-        {
-            throw new Exception("Missing: Name");
         }
 
-        var privateKey = await ExecuteCommandAsync("wg", "genkey");
-        var publicKey = await ExecuteCommandAsync("wg", "pubkey", privateKey);
-        var preSharedKey = await ExecuteCommandAsync("wg", "genpsk");
-
-        var address = Enumerable.Range(2, 253)
-            .Select(i => _config.WgDefaultAddress.Replace("x", i.ToString()))
-            .FirstOrDefault(ip => !_config.ParsedConfig.Clients.Values.Any(c => c.Address == ip));
-
-        if (address == null)
+        public async Task<string> GetClientQRCodeSvgAsync(string clientId)
         {
-            throw new Exception("Maximum number of clients reached.");
+            var config = await GetClientConfigurationAsync(clientId);
+            var qrGenerator = new QRCodeGenerator();
+            var qrCodeData = qrGenerator.CreateQrCode(config, QRCodeGenerator.ECCLevel.Q);
+            var qrCode = new SvgQRCode(qrCodeData);
+            return qrCode.GetGraphic(20);
         }
 
-        var id = Guid.NewGuid().ToString();
-        var client = new ClientConfig
+        public async Task<ClientConfig> CreateClientAsync(string name)
         {
-            Id = id,
-            Name = name,
-            Address = address,
-            PrivateKey = privateKey,
-            PublicKey = publicKey,
-            PreSharedKey = preSharedKey,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            Enabled = true
-        };
+            if (string.IsNullOrEmpty(name))
+            {
+                throw new Exception("Missing: Name");
+            }
 
-        _config.ParsedConfig.Clients[id] = client;
+            var privateKey = await ExecuteCommandAsync("wg", "genkey");
+            var publicKey = await ExecuteCommandAsync("wg", "pubkey", privateKey);
+            var preSharedKey = await ExecuteCommandAsync("wg", "genpsk");
 
-        await SaveConfigAsync();
-        await SyncConfigAsync();
+            var address = Enumerable.Range(2, 253)
+                .Select(i => _config.WgDefaultAddress.Replace("x", i.ToString()))
+                .FirstOrDefault(ip => !_config.Clients.Values.Any(c => c.Address == ip));
 
-        return client;
-    }
+            if (address == null)
+            {
+                throw new Exception("Maximum number of clients reached.");
+            }
 
-    public async Task DeleteClientAsync(string clientId)
-    {
-        if (_config.ParsedConfig.Clients.Remove(clientId))
+            var id = Guid.NewGuid().ToString();
+            var client = new ClientConfig
+            {
+                Id = id,
+                Name = name,
+                Address = address,
+                PrivateKey = privateKey,
+                PublicKey = publicKey,
+                PreSharedKey = preSharedKey,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                Enabled = true,
+                DownloadableConfig = true
+            };
+
+            _config.Clients[id] = client;
+
+            await SaveConfigAsync();
+            await SyncConfigAsync();
+
+            return client;
+        }
+
+        public async Task DeleteClientAsync(string clientId)
         {
+            if (_config.Clients.Remove(clientId))
+            {
+                await SaveConfigAsync();
+                await SyncConfigAsync();
+            }
+        }
+
+        public async Task EnableClientAsync(string clientId)
+        {
+            var client = await GetClientAsync(clientId);
+            client.Enabled = true;
+            client.UpdatedAt = DateTime.UtcNow;
             await SaveConfigAsync();
             await SyncConfigAsync();
         }
-    }
 
-    public async Task EnableClientAsync(string clientId)
-    {
-        var client = await GetClientAsync(clientId);
-        client.Enabled = true;
-        client.UpdatedAt = DateTime.UtcNow;
-        await SaveConfigAsync();
-        await SyncConfigAsync();
-    }
-
-    public async Task DisableClientAsync(string clientId)
-    {
-        var client = await GetClientAsync(clientId);
-        client.Enabled = false;
-        client.UpdatedAt = DateTime.UtcNow;
-        await SaveConfigAsync();
-        await SyncConfigAsync();
-    }
-
-    public async Task UpdateClientNameAsync(string clientId, string name)
-    {
-        var client = await GetClientAsync(clientId);
-        client.Name = name;
-        client.UpdatedAt = DateTime.UtcNow;
-        await SaveConfigAsync();
-        await SyncConfigAsync();
-    }
-
-    public async Task UpdateClientAddressAsync(string clientId, string address)
-    {
-        var client = await GetClientAsync(clientId);
-        if (!IPAddress.TryParse(address, out var ipAddress) || ipAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+        public async Task DisableClientAsync(string clientId)
         {
-            throw new Exception($"Invalid Address: {address}");
+            var client = await GetClientAsync(clientId);
+            client.Enabled = false;
+            client.UpdatedAt = DateTime.UtcNow;
+            await SaveConfigAsync();
+            await SyncConfigAsync();
         }
-        client.Address = address;
-        client.UpdatedAt = DateTime.UtcNow;
-        await SaveConfigAsync();
-        await SyncConfigAsync();
-    }
 
-    public async Task RestoreConfigurationAsync(string configJson)
-    {
-        _logger.LogDebug("Starting configuration restore process.");
-        _config.ParsedConfig = JsonSerializer.Deserialize<ParsedConfig>(configJson);
-        await SaveConfigAsync();
-        await SyncConfigAsync();
-        _logger.LogDebug("Configuration restore process completed.");
-    }
-
-    public async Task<string> BackupConfigurationAsync()
-    {
-        _logger.LogDebug("Starting configuration backup.");
-        var backup = JsonSerializer.Serialize(_config.ParsedConfig, new JsonSerializerOptions { WriteIndented = true });
-        _logger.LogDebug("Configuration backup completed.");
-        return backup;
-    }
-
-    public async Task ShutdownAsync()
-    {
-        await ExecuteCommandAsync("wg-quick", "down wg0").ContinueWith(_ => { });
-    }
-
-    private async Task<string> ExecuteCommandAsync(string command, string arguments, string input = null)
-    {
-        using var process = new Process
+        public async Task UpdateClientNameAsync(string clientId, string name)
         {
-            StartInfo = new ProcessStartInfo
+            var client = await GetClientAsync(clientId);
+            client.Name = name;
+            client.UpdatedAt = DateTime.UtcNow;
+            await SaveConfigAsync();
+            await SyncConfigAsync();
+        }
+
+        public async Task UpdateClientAddressAsync(string clientId, string address)
+        {
+            var client = await GetClientAsync(clientId);
+            if (!IPAddress.TryParse(address, out var ipAddress) || ipAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
             {
-                FileName = command,
-                Arguments = arguments,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                RedirectStandardInput = input != null,
-                UseShellExecute = false,
-                CreateNoWindow = true,
+                throw new Exception($"Invalid Address: {address}");
             }
-        };
-
-        process.Start();
-
-        if (input != null)
-        {
-            await process.StandardInput.WriteLineAsync(input);
-            await process.StandardInput.FlushAsync();
-            process.StandardInput.Close();
+            client.Address = address;
+            client.UpdatedAt = DateTime.UtcNow;
+            await SaveConfigAsync();
+            await SyncConfigAsync();
         }
 
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-
-        await process.WaitForExitAsync();
-
-        if (process.ExitCode != 0)
+        private async Task<string> ExecuteCommandAsync(string command, string arguments, string input = null)
         {
-            throw new Exception($"Command '{command} {arguments}' failed with exit code {process.ExitCode}. Error: {error}");
-        }
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = command,
+                    Arguments = arguments,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    RedirectStandardInput = input != null,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                }
+            };
 
-        return output.Trim();
+            process.Start();
+
+            if (input != null)
+            {
+                await process.StandardInput.WriteLineAsync(input);
+                await process.StandardInput.FlushAsync();
+                process.StandardInput.Close();
+            }
+
+            var output = await process.StandardOutput.ReadToEndAsync();
+            var error = await process.StandardError.ReadToEndAsync();
+
+            await process.WaitForExitAsync();
+
+            if (process.ExitCode != 0)
+            {
+                throw new Exception($"Command '{command} {arguments}' failed with exit code {process.ExitCode}. Error: {error}");
+            }
+            return output.Trim();
+        }
     }
 }

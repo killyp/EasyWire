@@ -4,7 +4,7 @@
       context: .
       dockerfile: EasyWire/Dockerfile
     ports:
-      - "5000:8080"
+      - "4444:8080"
       - "51820:51820/udp"
     environment:
       - WG_HOST=CHANGE_ME

@@ -23,7 +23,7 @@
                 </CardHeaderContent>
             </MudCardHeader>
             <MudCardContent>
-                <MudTextField @bind-Value="_password" Label="Password" InputType="InputType.Password" Variant="Variant.Outlined" />
+                <MudTextField @bind-Value="_password" Label="Password" InputType="InputType.Password" Variant="Variant.Outlined"  @onkeyup="HandleKeyPress"/>
             </MudCardContent>
             <MudCardActions>
                 <MudButton Color="Color.Primary" Variant="Variant.Filled" FullWidth="true" OnClick="Login">Login</MudButton>
@@ -90,7 +90,7 @@
 </MudContainer>
 
 @code {
-    private List<ClientInfo> _clients = new();
+    private List<ClientConfig> _clients = new();
     private bool _isAuthenticated = false;
     private string _password = "";
     private bool _isLoading = true;
@@ -100,6 +100,14 @@
         if (firstRender)
         {
             await CheckAuthenticationAsync();
+        }
+    }
+    
+    private async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await Login();
         }
     }
 
@@ -162,7 +170,7 @@
         }
     }
 
-    private async Task OpenEditDialog(ClientInfo client)
+    private async Task OpenEditDialog(ClientConfig client)
     {
         var parameters = new DialogParameters { ["ClientId"] = client.Id };
         var dialog = DialogService.Show<EditConfigDialog>("Edit Configuration", parameters);
@@ -173,20 +181,20 @@
         }
     }
 
-    private async Task ShowQRCode(ClientInfo client)
+    private async Task ShowQRCode(ClientConfig client)
     {
         var qrCode = await WireguardService.GetClientQRCodeSvgAsync(client.Id);
         var parameters = new DialogParameters { ["QRCodeSvg"] = qrCode };
         DialogService.Show<QRCodeDialog>($"QR Code for {client.Name}", parameters);
     }
 
-    private async Task DownloadConfig(ClientInfo client)
+    private async Task DownloadConfig(ClientConfig client)
     {
         var config = await WireguardService.GetClientConfigurationAsync(client.Id);
         await JSRuntime.InvokeVoidAsync("downloadFile", $"{client.Name}.conf", config);
     }
 
-    private async Task DeleteConfig(ClientInfo client)
+    private async Task DeleteConfig(ClientConfig client)
     {
         var result = await DialogService.ShowMessageBox(
             "Delete Configuration",
