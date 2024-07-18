@@ -8,8 +8,8 @@
       - "80:8080"
       - "51820:51820/udp"
     environment:
-      - WG_HOST=CHANGE_ME
-      - PASSWORD=CHANGE_ME
+      - HOST=
+      - PASSWORD=
     cap_add:
       - NET_ADMIN
     sysctls:
@@ -17,7 +17,7 @@
     volumes:
       - wireguard_config:/etc/wireguard
       - easywire_config:/app/keys
-    restart: unless-stopped
+    # restart: unless-stopped
     
 volumes: 
   wireguard_config:

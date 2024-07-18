@@ -94,11 +94,13 @@
     private bool _isAuthenticated = false;
     private string _password = "";
     private bool _isLoading = true;
+    private string _correctPasswordHash;
     
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
+            _correctPasswordHash = await WireguardService.GetPasswordHashAsync();
             await CheckAuthenticationAsync();
         }
     }
@@ -116,8 +118,7 @@
         var storedHashResult = await LocalStorage.GetAsync<string>("Hash");
         if (storedHashResult.Success)
         {
-            var correctPasswordHash = ComputeHash(Configuration["PASSWORD"]);
-            _isAuthenticated = storedHashResult.Value == correctPasswordHash;
+            _isAuthenticated = storedHashResult.Value == _correctPasswordHash;
 
             if (_isAuthenticated)
             {
@@ -130,10 +131,9 @@
 
     private async Task Login()
     {
-        var correctPasswordHash = ComputeHash(Configuration["PASSWORD"]);
         var inputPasswordHash = ComputeHash(_password);
 
-        if (inputPasswordHash == correctPasswordHash)
+        if (inputPasswordHash == _correctPasswordHash)
         {
             _isAuthenticated = true;
             await LocalStorage.SetAsync("Hash", inputPasswordHash);

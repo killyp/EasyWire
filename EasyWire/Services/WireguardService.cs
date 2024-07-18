@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using EasyWire.Models;
 using Microsoft.Extensions.Logging;
 using QRCoder;
+using HostingEnvironmentExtensions = Microsoft.AspNetCore.Hosting.HostingEnvironmentExtensions;
 
 namespace EasyWire.Services
 {
@@ -20,34 +21,42 @@ namespace EasyWire.Services
         public WireguardService()
         {
             _config = new WireGuardConfig();
-            
-            if (string.IsNullOrEmpty(_config.WgHost))
-            {
-                throw new Exception("WG_HOST Environment Variable Not Set!");
-            }
         }
 
         public async Task InitializeAsync()
         {
-            if (string.IsNullOrEmpty(_config.WgHost))
-            {
-                throw new Exception("WG_HOST Environment Variable Not Set!");
-            }
-
-            Console.WriteLine("Loading configuration...");
             try
             {
-                var configJsonPath = await File.ReadAllTextAsync(Path.Combine(_config.WgPath, "wg0.json"));
+                var configJsonPath = await File.ReadAllTextAsync(Path.Combine(_config.WireguardPath, "wg0.json"));
                 _config = JsonSerializer.Deserialize<WireGuardConfig>(configJsonPath);
-                Console.WriteLine("Configuration loaded.");
             }
             catch (Exception)
             {
+                _config.WireguardPath = "/etc/wireguard";
+                _config.Host = Environment.GetEnvironmentVariable("HOST") ?? "";
+                _config.PasswordHash = Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Environment.GetEnvironmentVariable("PASSWORD") ?? "")));
+                _config.ExternalVpnPort = int.Parse(Environment.GetEnvironmentVariable("VPN_PORT") ?? "51820");
+                _config.InternalVpnPort = 51820;
+                _config.VpnDns = Environment.GetEnvironmentVariable("VPN_DNS") ?? "1.1.1.1";
+                _config.VpnAddressSpace = "192.168.2.x";
+                _config.VpnKeepalive = 25;
+                _config.WgAllowedIps = "0.0.0.0/0, ::/0";
                 _config.ServerPrivateKey = await ExecuteCommandAsync("wg", "genkey");
                 _config.ServerPublicKey = await ExecuteCommandAsync("wg", "pubkey", _config.ServerPrivateKey);
-                _config.ServerAddress = _config.WgDefaultAddress.Replace("x", "1");
+                _config.ServerAddress = _config.VpnAddressSpace.Replace("x", "1");
                 _config.Clients = new Dictionary<string, ClientConfig>();
-                Console.WriteLine("Configuration generated.");
+
+                if (String.IsNullOrEmpty(_config.Host))
+                {
+                    Console.WriteLine("Please set the HOST environment variable to the public IP address of your server.");
+                    Environment.Exit(0);
+                }
+                
+                if (String.IsNullOrEmpty(Environment.GetEnvironmentVariable("PASSWORD")))
+                {
+                    Console.WriteLine("Please set the PASSWORD environment variable to a secure password.");
+                    Environment.Exit(0);
+                }
             }
 
             await SaveConfigAsync();
@@ -75,17 +84,22 @@ namespace EasyWire.Services
             if (isSettingUp)
             {
                 await ExecuteCommandAsync("iptables", $"-t nat -A POSTROUTING -s {_config.ServerAddress}/24 -o {device} -j MASQUERADE");
-                await ExecuteCommandAsync("iptables", $"-A INPUT -p udp -m udp --dport {_config.WgPort} -j ACCEPT");
+                await ExecuteCommandAsync("iptables", $"-A INPUT -p udp -m udp --dport {_config.ExternalVpnPort} -j ACCEPT");
                 await ExecuteCommandAsync("iptables", $"-A FORWARD -i wg0 -j ACCEPT");
                 await ExecuteCommandAsync("iptables", $"-A FORWARD -o wg0 -j ACCEPT");
             }
             else
             {
                 await ExecuteCommandAsync("iptables", $"-t nat -D POSTROUTING -s {_config.ServerAddress}/24 -o {device} -j MASQUERADE");
-                await ExecuteCommandAsync("iptables", $"-D INPUT -p udp -m udp --dport {_config.WgPort} -j ACCEPT");
+                await ExecuteCommandAsync("iptables", $"-D INPUT -p udp -m udp --dport {_config.ExternalVpnPort} -j ACCEPT");
                 await ExecuteCommandAsync("iptables", $"-D FORWARD -i wg0 -j ACCEPT");
                 await ExecuteCommandAsync("iptables", $"-D FORWARD -o wg0 -j ACCEPT");
             }
+        }
+        
+        public async Task<string> GetPasswordHashAsync()
+        {
+            return _config.PasswordHash;
         }
 
         public async Task<List<ClientConfig>> GetClientsAsync()
@@ -137,14 +151,9 @@ namespace EasyWire.Services
 [Interface]
 PrivateKey = {_config.ServerPrivateKey}
 Address = {_config.ServerAddress}/24
-ListenPort = {_config.WgPort}
-PreUp = {_config.WgPreUp}
-PostUp = {_config.WgPostUp}
-PreDown = {_config.WgPreDown}
-PostDown = {_config.WgPostDown}
+ListenPort = {_config.InternalVpnPort}
 ";
-
-            Console.WriteLine(configContent);
+            
             foreach (var (clientId, client) in _config.Clients)
             {
                 if (!client.Enabled) continue;
@@ -157,15 +166,12 @@ PublicKey = {client.PublicKey}
 {(client.PreSharedKey != null ? $"PresharedKey = {client.PreSharedKey}\n" : "")}AllowedIPs = {client.Address}/32";
             }
 
-            Console.WriteLine("Config saving...");
-            await File.WriteAllTextAsync(Path.Combine(_config.WgPath, "wg0.json"), JsonSerializer.Serialize(_config, new JsonSerializerOptions { WriteIndented = true }));
-            await File.WriteAllTextAsync(Path.Combine(_config.WgPath, "wg0.conf"), configContent);
-            Console.WriteLine("Config saved.");
+            await File.WriteAllTextAsync(Path.Combine(_config.WireguardPath, "wg0.json"), JsonSerializer.Serialize(_config, new JsonSerializerOptions { WriteIndented = true }));
+            await File.WriteAllTextAsync(Path.Combine(_config.WireguardPath, "wg0.conf"), configContent);
         }
 
         public async Task SyncConfigAsync()
         {
-            Console.WriteLine("Config syncing...");
             var tempConfigFile = Path.Combine(Path.GetTempPath(), "wg0.sync.conf");
             try
             {
@@ -180,7 +186,6 @@ PublicKey = {client.PublicKey}
                     File.Delete(tempConfigFile);
                 }
             }
-            Console.WriteLine("Config synced.");
         }
 
         public async Task<ClientConfig> GetClientAsync(string clientId)
@@ -200,14 +205,14 @@ PublicKey = {client.PublicKey}
 [Interface]
 PrivateKey = {client.PrivateKey}
 Address = {client.Address}/24
-{(_config.WgDefaultDns != null ? $"DNS = {_config.WgDefaultDns}\n" : "")}
+{(_config.VpnDns != null ? $"DNS = {_config.VpnDns}\n" : "")}
 
 [Peer]
 PublicKey = {_config.ServerPublicKey}
 {(client.PreSharedKey != null ? $"PresharedKey = {client.PreSharedKey}" : "")}
 AllowedIPs = {_config.WgAllowedIps}
-PersistentKeepalive = {_config.WgPersistentKeepalive}
-Endpoint = {_config.WgHost}:{_config.WgPort}";
+PersistentKeepalive = {_config.VpnKeepalive}
+Endpoint = {_config.Host}:{_config.ExternalVpnPort}";
         }
 
         public async Task<string> GetClientQRCodeSvgAsync(string clientId)
@@ -231,7 +236,7 @@ Endpoint = {_config.WgHost}:{_config.WgPort}";
             var preSharedKey = await ExecuteCommandAsync("wg", "genpsk");
 
             var address = Enumerable.Range(2, 253)
-                .Select(i => _config.WgDefaultAddress.Replace("x", i.ToString()))
+                .Select(i => _config.VpnAddressSpace.Replace("x", i.ToString()))
                 .FirstOrDefault(ip => !_config.Clients.Values.Any(c => c.Address == ip));
 
             if (address == null)

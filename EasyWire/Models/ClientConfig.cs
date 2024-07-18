@@ -13,7 +13,6 @@ public class ClientConfig
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public bool Enabled { get; set; }
-    public string AllowedIPs { get; set; }
     public bool DownloadableConfig { get; set; }
     public string PersistentKeepalive { get; set; }
     public DateTime? LatestHandshakeAt { get; set; }
